@@ -23,18 +23,10 @@ contract GovToken is Initializable,ContextUpgradeable,OwnableUpgradeable,ERC20Up
     function initialize() public initializer {
         __Ownable_init(_msgSender());
         __UUPSUpgradeable_init();
-        __ERC20_init("UBYS Gov", "UBYS");
+        __ERC20_init("Ubit USD", "BTUSD");
     }
 
      function isInitialized() external view returns (bool) {
-    }
-
-    function mint(address user,uint256 amount) external {
-        _mint(user, amount);
-    }
-
-    function burn(address user,uint256 amount) external {
-        _burn(user, amount);
     }
 
     function _authorizeUpgrade(address newImplementation) internal view override onlyOwner {}
