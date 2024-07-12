@@ -12,7 +12,7 @@ contract veUAB is ERC20, Ownable, ERC20Permit, ERC20Votes {
         _mint(_timelock, 1000 * 10 ** decimals());
     }
 
-    function mint(address to, uint256 amount) public onlyOwner {
+    function mint(address to, uint256 amount) public  {
         _mint(to, amount);
     }
 

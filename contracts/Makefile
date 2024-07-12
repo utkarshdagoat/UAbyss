@@ -37,15 +37,15 @@ ifeq ($(findstring --network ubit,$(ARGS)),--network ubit)
 endif
 
 deploy:
-	@forge script script/Deploy.s.sol:DeploDSC $(NETWORK_ARGS)
+	@forge script script/Deploy.s.sol:Deploy $(NETWORK_ARGS)
 deployGov:
 	@forge script script/DeployGov.s.sol:DeployGov $(NETWORK_ARGS)
 deployStableCoin:
 	@forge script script/DeployStableCoin.s.sol:DeployStableCoin $(NETWORK_ARGS)
 deployStableCoinManager:
 	@forge script script/DeployStableCoinManager.s.sol:DeployStableCoinManager $(NETWORK_ARGS)
-ChangeOwnership:
-	@forge script script/ChangeOwnership.s.sol:ChangeOwnership $(NETWORK_ARGS)
+deployDSC:
+	@forge script script/DeploySC.s.sol:DeploySC $(NETWORK_ARGS)
 
 
 

@@ -15,7 +15,7 @@ contract DeployStableCoin is Script {
         vm.startBroadcast();
         ABUSD abusd= new ABUSD();
         ERC1967Proxy proxy = new ERC1967Proxy(address(abusd), "");
-        ABUSD(address(proxy)).initialize();
+        // ABUSD(address(proxy)).initialize();
         vm.stopBroadcast();
         return address(proxy);
     }

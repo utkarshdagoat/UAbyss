@@ -10,22 +10,20 @@ import "@openzeppelin/contracts/governance/extensions/GovernorVotes.sol";
 
 
 contract DeployGov is Script {
-
+    address me =  0x67ff09c184d8e9e7B90C5187ED04cbFbDba741C8;
     function run() external returns (address token,address gov,address timelock) {
         address[] memory proposers = new address[](1);
-        proposers[0] = msg.sender;
+        proposers[0] = me;
         address[] memory executors = new address[](1);
-        executors[0] = msg.sender;
+        executors[0] =me;
         vm.startBroadcast();
-        TimeLock timeLock = new TimeLock(3600,proposers,executors, msg.sender);
+        TimeLock timeLock = new TimeLock(3600,proposers,executors, me);
         timelock = address(timeLock);
         veUAB veuab = new veUAB(timelock);
         token = address(veuab);
-        veuab.mint(msg.sender,100);
+        veuab.mint(me,100);
         UAbyssGovernor governor = new UAbyssGovernor(IVotes(veuab),timeLock);
         gov = address(governor);
         vm.stopBroadcast(); 
     } 
-
-
 }
