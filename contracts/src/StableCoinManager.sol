@@ -1,11 +1,21 @@
 pragma solidity ^0.8.26;
 
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {ContextUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ContextUpgradeable.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import {ABUSD} from "./StableCoin.sol";
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {Context} from "@openzeppelin/contracts/utils/Context.sol";
 
-contract abUSDManager is ReentrancyGuard , Context {
+
+contract abUSDManager is
+    Initializable,
+    ContextUpgradeable,
+    OwnableUpgradeable,
+    UUPSUpgradeable,
+    ReentrancyGuardUpgradeable
+{
     ///////////////////
     // Errors
     ///////////////////
@@ -33,7 +43,7 @@ contract abUSDManager is ReentrancyGuard , Context {
     uint256 private constant PRECISION = 1e18;
 
     /// @dev Amount of collateral deposited by user
-    mapping(address user => uint256 amount)
+    mapping(address user => mapping(address collateralToken => uint256 amount))
         private collateralDeposited;
     /// @dev Amount of DSC minted by user
     mapping(address user => uint256 amount) private abUSDMinted;
@@ -46,11 +56,13 @@ contract abUSDManager is ReentrancyGuard , Context {
     ///////////////////
     event CollateralDeposited(
         address indexed user,
+        address indexed token,
         uint256 indexed amount
     );
     event CollateralRedeemed(
         address indexed redeemFrom,
         address indexed redeemTo,
+        address token,
         uint256 amount
     );
 
@@ -76,30 +88,38 @@ contract abUSDManager is ReentrancyGuard , Context {
         }
         _;
     }
-    constructor(address dscAddress) {
-        abUSD =ABUSD(dscAddress);
+
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(
+        address[] memory _collateralTokens,
+        address _token,
+        address initialOwner
+    ) public initializer {
+        __Ownable_init(initialOwner);
+        __UUPSUpgradeable_init();
+        __ReentrancyGuard_init();
+        abUSD = ABUSD(_token);
+        collateralTokens = _collateralTokens;
     }
 
     function depositCollateralAndmintabUSD(
+        address tokenCollateralAddress,
         uint256 amountCollateral,
         uint256 amountDscToMint
     ) external payable {
-        require(
-            msg.value == amountCollateral,
-            "BMEngine__DepositAmountMismatch"
-        );
-        depositCollateral(amountCollateral);
+        require(msg.value == amountCollateral,"BMEngine__DepositAmountMismatch");
+        depositCollateral(tokenCollateralAddress, amountCollateral);
         mintabUSD(amountDscToMint);
     }
 
-    function getCollaterilaztionRatio(
-        uint256 amount
-    ) external view returns (uint256) {
-        uint256 contribInv = totalabUSDMinted / amount;
-        uint256 collateralizationRatio = 1 +
-            contribInv +
-            contribInv *
-            contribInv;
+
+    function getCollaterilaztionRatio(uint256 amount) external view returns(uint256){
+        uint256 contribInv = totalabUSDMinted/amount;
+        uint256 collateralizationRatio = 1 + contribInv + contribInv*contribInv;
         return collateralizationRatio;
     }
 
@@ -110,63 +130,18 @@ contract abUSDManager is ReentrancyGuard , Context {
     )
         external
         moreThanZero(amountCollateral)
+        isAllowedToken(tokenCollateralAddress)
     {
         _burnDsc(amountDscToBurn, _msgSender(), _msgSender());
-        _redeemCollateral(
-            tokenCollateralAddress,
-            amountCollateral,
-            _msgSender(),
-            _msgSender()
-        );
+        _redeemCollateral(tokenCollateralAddress, amountCollateral, _msgSender(), _msgSender());
         revertIfHealthFactorIsBroken(_msgSender());
     }
 
-    function liquidate(
-        address collateral,
-        address user,
-        uint256 debtToCover
-    )
-        external
-        moreThanZero(debtToCover)
-        nonReentrant
-    {
-        uint256 startingUserHealthFactor = _healthFactor(user);
-        if (startingUserHealthFactor >= MIN_HEALTH_FACTOR) {
-            revert BMEngine__HealthFactorOk();
-        }
-        // If covering 100  we need to $100 of collateral
-        // And give them a 10% bonus
-        // So we are giving the liquidator $110 of  for 100 
-        // We should implement a feature to liquidate in the event the protocol is insolvent
-        // And sweep extra amounts into a treasury
-        uint256 bonusCollateral = (debtToCover * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION;
-        // Burn DSC equal to debtToCover
-        // Figure out how much collateral to recover based on how much burnt
-        _redeemCollateral(collateral, debtToCover + bonusCollateral, user, msg.sender);
-        _burnDsc(debtToCover, user, msg.sender);
-
-        uint256 endingUserHealthFactor = _healthFactor(user);
-        // This conditional should never hit, but just in case
-        if (endingUserHealthFactor <= startingUserHealthFactor) {
-            revert BMEngine__HealthFactorOk();
-        }
-        revertIfHealthFactorIsBroken(msg.sender);
-    }
-
-
-    function _burnDsc(
-        uint256 amountDscToBurn,
-        address onBehalfOf,
-        address dscFrom
-    ) private {
+    function _burnDsc(uint256 amountDscToBurn, address onBehalfOf, address dscFrom) private {
         abUSDMinted[onBehalfOf] -= amountDscToBurn;
 
-        bool success = abUSD.transferFrom(
-            dscFrom,
-            address(this),
-            amountDscToBurn
-        );
-
+        bool success = abUSD.transferFrom(dscFrom, address(this), amountDscToBurn);
+        
         // This conditional is hypothetically unreachable
         if (!success) {
             revert BMEngine__TransferFailed();
@@ -174,18 +149,17 @@ contract abUSDManager is ReentrancyGuard , Context {
         abUSD.burn(amountDscToBurn);
     }
 
+
     function _redeemCollateral(
         address tokenCollateralAddress,
         uint256 amountCollateral,
         address from,
         address to
-    ) private {
-        collateralDeposited[from] -= amountCollateral;
-        emit CollateralRedeemed(
-            from,
-            to,
-            amountCollateral
-        );
+    )
+        private
+    {
+        collateralDeposited[from][tokenCollateralAddress] -= amountCollateral;
+        emit CollateralRedeemed(from, to, tokenCollateralAddress, amountCollateral);
         payable(to).transfer(amountCollateral);
     }
 
@@ -195,17 +169,16 @@ contract abUSDManager is ReentrancyGuard , Context {
     }
 
     function depositCollateral(
+        address tokenCollateralAddress,
         uint256 amountCollateral
     )
         public
         moreThanZero(amountCollateral)
         nonReentrant
+        isAllowedToken(tokenCollateralAddress)
     {
-        collateralDeposited[_msgSender()] += amountCollateral;
-        emit CollateralDeposited(
-            _msgSender(),
-            amountCollateral
-        );
+        collateralDeposited[_msgSender()][tokenCollateralAddress] += amountCollateral;
+        emit CollateralDeposited(_msgSender(), tokenCollateralAddress, amountCollateral);
     }
 
     function mintabUSD(
@@ -243,9 +216,19 @@ contract abUSDManager is ReentrancyGuard , Context {
         returns (uint256 totalDscMinted, uint256 collateralValueInUsd)
     {
         totalDscMinted = abUSDMinted[user];
-        collateralValueInUsd = collateralDeposited[user];
+        collateralValueInUsd = getAccountCollateralValue(user);
     }
 
+    function getAccountCollateralValue(
+        address user
+    ) public view returns (uint256 totalCollateralValueInUsd) {
+        for (uint256 index = 0; index < collateralTokens.length; index++) {
+            address token = collateralTokens[index];
+            uint256 amount = collateralDeposited[user][token];
+            totalCollateralValueInUsd += _getUsdValue(token, amount);
+        }
+        return totalCollateralValueInUsd;
+    }
 
     function _getUsdValue(
         address token,
@@ -258,10 +241,12 @@ contract abUSDManager is ReentrancyGuard , Context {
         uint256 abUSDMinted,
         uint256 collateralValueInUsd
     ) internal view returns (uint256) {
-        if (abUSDMinted == 0) return type(uint256).max;
-        uint256 collateralAdjustedForThreshold = (collateralValueInUsd *
-            LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
+        if (abUSDMinted== 0) return type(uint256).max;
+        uint256 collateralAdjustedForThreshold = (collateralValueInUsd *LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
         return (collateralAdjustedForThreshold * PRECISION) / abUSDMinted;
     }
 
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyOwner {}
 }
